@@ -1,0 +1,6 @@
+{
+  "name": "Dual-Timezone 24h Scheduler",
+  "description": "Password-protected 24-hour calendar view displaying dual timezones with event scheduling and user identity selection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
