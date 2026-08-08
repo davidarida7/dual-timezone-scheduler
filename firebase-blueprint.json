@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "calendars": {
+      "title": "Calendars",
+      "description": "Calendar context containing events and user avatar profiles for dual timezone pairs",
+      "type": "object",
+      "properties": {
+        "contextKey": {
+          "type": "string",
+          "description": "Unique context key derived from timezones and user names"
+        },
+        "events": {
+          "type": "array",
+          "description": "List of calendar events scheduled in this calendar context",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "description": { "type": "string" },
+              "location": { "type": "string" },
+              "startTimeIso": { "type": "string" },
+              "durationMinutes": { "type": "number" },
+              "createdBy": { "type": "string" },
+              "category": { "type": "string" },
+              "createdAt": { "type": "string" }
+            }
+          }
+        },
+        "avatars": {
+          "type": "object",
+          "description": "User avatar photo URLs for user1 and user2 tied to this context",
+          "properties": {
+            "user1": { "type": "string" },
+            "user2": { "type": "string" }
+          }
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        }
+      },
+      "required": ["contextKey"]
+    }
+  }
+}

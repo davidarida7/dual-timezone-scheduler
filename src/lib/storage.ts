@@ -5,28 +5,39 @@ const STORAGE_KEYS = {
   AVATARS: 'dual_tz_user_avatars_v1',
 };
 
-export function getStoredAvatars(): Record<'user1' | 'user2', string | undefined> {
+export function getStoredAvatars(contextKey: string = DEFAULT_CONTEXT_KEY): Record<'user1' | 'user2', string | undefined> {
   if (typeof window === 'undefined') return { user1: undefined, user2: undefined };
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.AVATARS);
     if (!raw) return { user1: undefined, user2: undefined };
     const parsed = JSON.parse(raw);
-    return {
-      user1: parsed.user1 ? parsed.user1 : undefined,
-      user2: parsed.user2 ? parsed.user2 : undefined,
-    };
+    const contextAvatars = parsed[contextKey];
+    if (contextAvatars && typeof contextAvatars === 'object') {
+      return {
+        user1: contextAvatars.user1 || undefined,
+        user2: contextAvatars.user2 || undefined,
+      };
+    }
+    return { user1: undefined, user2: undefined };
   } catch (e) {
     console.error('Failed to parse user avatars:', e);
     return { user1: undefined, user2: undefined };
   }
 }
 
-export function saveStoredAvatar(userId: 'user1' | 'user2', avatarUrl: string | undefined): void {
+export function saveStoredAvatar(
+  contextKey: string = DEFAULT_CONTEXT_KEY,
+  userId: 'user1' | 'user2',
+  avatarUrl: string | undefined
+): void {
   if (typeof window === 'undefined') return;
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.AVATARS);
     const parsed = raw ? JSON.parse(raw) : {};
-    parsed[userId] = avatarUrl || '';
+    if (!parsed[contextKey]) {
+      parsed[contextKey] = {};
+    }
+    parsed[contextKey][userId] = avatarUrl || '';
     localStorage.setItem(STORAGE_KEYS.AVATARS, JSON.stringify(parsed));
   } catch (e) {
     console.error('Failed to save user avatar:', e);
@@ -145,7 +156,7 @@ export function deleteEvent(eventId: string, contextKey: string = DEFAULT_CONTEX
   saveEvents(updated, contextKey);
 }
 
-function generateInitialDemoEvents(): CalendarEvent[] {
+export function generateInitialDemoEvents(): CalendarEvent[] {
   const now = new Date();
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
 

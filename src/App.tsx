@@ -3,13 +3,18 @@ import { CalendarEvent, UserProfile } from './types';
 import { parseUrlParams, get24HourSlots } from './lib/timeUtils';
 import {
   getStoredEvents,
-  addEvent,
-  updateEvent,
-  deleteEvent,
+  saveEvents,
   getStoredAvatars,
   saveStoredAvatar,
   getContextKey,
+  pruneExpiredEvents,
+  DEFAULT_CONTEXT_KEY,
 } from './lib/storage';
+import {
+  subscribeToContext,
+  saveEventsToFirestore,
+  saveAvatarToFirestore,
+} from './lib/firebase';
 import { Header } from './components/Header';
 import { CalendarView } from './components/CalendarView';
 import { EventModal } from './components/EventModal';
@@ -25,14 +30,13 @@ export default function App() {
   const [leftTz, setLeftTz] = useState<string>(urlConfig.tz1);
   const [rightTz, setRightTz] = useState<string>(urlConfig.tz2);
 
-  // User identities from URL, local storage, or defaults
+  // User identities from URL or defaults
   const [userProfiles, setUserProfiles] = useState<Record<'user1' | 'user2', UserProfile>>(() => {
-    const savedAvatars = getStoredAvatars();
     return {
       user1: {
         id: 'user1',
         name: urlConfig.user1,
-        avatarUrl: savedAvatars.user1 !== undefined ? savedAvatars.user1 : urlConfig.img1,
+        avatarUrl: urlConfig.img1,
         color: '#a855f7', // purple-500
         bgColor: 'bg-purple-950/40',
         badgeBg: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
@@ -40,7 +44,7 @@ export default function App() {
       user2: {
         id: 'user2',
         name: urlConfig.user2,
-        avatarUrl: savedAvatars.user2 !== undefined ? savedAvatars.user2 : urlConfig.img2,
+        avatarUrl: urlConfig.img2,
         color: '#3b82f6', // blue-500 navy
         bgColor: 'bg-indigo-950/40',
         badgeBg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
@@ -63,7 +67,7 @@ export default function App() {
   const [isTzModalOpen, setIsTzModalOpen] = useState(false);
   const [tzTargetSide, setTzTargetSide] = useState<'left' | 'right'>('left');
 
-  // Derive current parameters context key
+  // Derive current parameters context key (tied to timezones and user names)
   const currentContextKey = getContextKey(
     leftTz,
     rightTz,
@@ -71,7 +75,7 @@ export default function App() {
     userProfiles.user2.name
   );
 
-  // Avatar update and persistence handler
+  // Avatar update and persistence handler (keyed by currentContextKey)
   const handleUpdateAvatar = (userId: 'user1' | 'user2', avatarUrl: string | undefined) => {
     setUserProfiles((prev) => ({
       ...prev,
@@ -80,24 +84,87 @@ export default function App() {
         avatarUrl,
       },
     }));
-    saveStoredAvatar(userId, avatarUrl);
+    saveStoredAvatar(currentContextKey, userId, avatarUrl);
+    saveAvatarToFirestore(currentContextKey, userId, avatarUrl, events);
   };
 
-  // Function to refresh & auto-prune events from storage for current context key
-  const refreshEvents = (key: string = currentContextKey) => {
-    setEvents(getStoredEvents(key));
-  };
-
-  // Load events on context key change and poll every 15s to auto-remove events once their time passes
+  // Real-time Firestore synchronization for events and avatars tied to currentContextKey
   useEffect(() => {
-    refreshEvents(currentContextKey);
+    // 1. Initial local load
+    const cachedEvents = getStoredEvents(currentContextKey);
+    setEvents(cachedEvents);
 
+    const cachedAvatars = getStoredAvatars(currentContextKey);
+    setUserProfiles((prev) => ({
+      user1: {
+        ...prev.user1,
+        avatarUrl: cachedAvatars.user1 !== undefined ? cachedAvatars.user1 : urlConfig.img1,
+      },
+      user2: {
+        ...prev.user2,
+        avatarUrl: cachedAvatars.user2 !== undefined ? cachedAvatars.user2 : urlConfig.img2,
+      },
+    }));
+
+    // 2. Real-time Firestore subscription across devices/browsers
+    const unsubscribe = subscribeToContext(
+      currentContextKey,
+      (data) => {
+        let rawEvents = data.events;
+
+        // If Firestore document is brand new & empty for DEFAULT_CONTEXT_KEY, load initial demo events
+        if (rawEvents.length === 0 && currentContextKey === DEFAULT_CONTEXT_KEY) {
+          rawEvents = getStoredEvents(DEFAULT_CONTEXT_KEY);
+        }
+
+        const activeEvents = pruneExpiredEvents(rawEvents);
+        setEvents(activeEvents);
+        saveEvents(activeEvents, currentContextKey);
+
+        // Sync avatars for this specific context key
+        const localAvatars = getStoredAvatars(currentContextKey);
+        const u1Avatar =
+          data.avatars.user1 !== undefined
+            ? (data.avatars.user1 || undefined)
+            : (localAvatars.user1 !== undefined ? localAvatars.user1 : urlConfig.img1);
+
+        const u2Avatar =
+          data.avatars.user2 !== undefined
+            ? (data.avatars.user2 || undefined)
+            : (localAvatars.user2 !== undefined ? localAvatars.user2 : urlConfig.img2);
+
+        setUserProfiles((prev) => {
+          if (prev.user1.avatarUrl === u1Avatar && prev.user2.avatarUrl === u2Avatar) {
+            return prev;
+          }
+          return {
+            user1: { ...prev.user1, avatarUrl: u1Avatar },
+            user2: { ...prev.user2, avatarUrl: u2Avatar },
+          };
+        });
+      },
+      (err) => {
+        console.warn('Firestore fallback to local storage:', err);
+      }
+    );
+
+    // Periodic prune for expired events
     const interval = setInterval(() => {
-      refreshEvents(currentContextKey);
+      setEvents((prevEvents) => {
+        const active = pruneExpiredEvents(prevEvents);
+        if (active.length !== prevEvents.length) {
+          saveEvents(active, currentContextKey);
+          saveEventsToFirestore(currentContextKey, active);
+        }
+        return active;
+      });
     }, 15000);
 
-    return () => clearInterval(interval);
-  }, [currentContextKey]);
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
+  }, [currentContextKey, urlConfig]);
 
   // Synchronize browser address bar URL parameters when settings change
   useEffect(() => {
@@ -142,23 +209,44 @@ export default function App() {
 
   // Event Save handler (Add or Update)
   const handleSaveEvent = (eventData: Omit<CalendarEvent, 'id' | 'createdAt'>) => {
+    let updatedEvents: CalendarEvent[] = [];
     if (editingEvent) {
       const updated: CalendarEvent = {
         ...editingEvent,
         ...eventData,
       };
-      updateEvent(updated, currentContextKey);
+      updatedEvents = events.map((ev) => (ev.id === updated.id ? updated : ev));
     } else {
-      addEvent(eventData, currentContextKey);
+      const newEv: CalendarEvent = {
+        ...eventData,
+        id: 'evt_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now(),
+        createdAt: new Date().toISOString(),
+      };
+      updatedEvents = [...events, newEv];
     }
-    refreshEvents(currentContextKey);
+
+    const activeEvents = pruneExpiredEvents(updatedEvents);
+    setEvents(activeEvents);
+    saveEvents(activeEvents, currentContextKey);
+    saveEventsToFirestore(currentContextKey, activeEvents, {
+      user1: userProfiles.user1.avatarUrl,
+      user2: userProfiles.user2.avatarUrl,
+    });
+
     setEditingEvent(null);
+    setIsEventModalOpen(false);
   };
 
   // Delete event handler
   const handleDeleteEvent = (eventId: string) => {
-    deleteEvent(eventId, currentContextKey);
-    refreshEvents(currentContextKey);
+    const updatedEvents = events.filter((ev) => ev.id !== eventId);
+    const activeEvents = pruneExpiredEvents(updatedEvents);
+    setEvents(activeEvents);
+    saveEvents(activeEvents, currentContextKey);
+    saveEventsToFirestore(currentContextKey, activeEvents, {
+      user1: userProfiles.user1.avatarUrl,
+      user2: userProfiles.user2.avatarUrl,
+    });
     setInspectEvent(null);
   };
 
