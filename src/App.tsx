@@ -8,12 +8,9 @@ import {
   saveStoredAvatar,
   getContextKey,
   pruneExpiredEvents,
+  fetchServerCalendarData,
+  saveServerCalendarData,
 } from './lib/storage';
-import {
-  saveCalendarStoreToDrive,
-  readCalendarStoreFromDrive,
-  getDriveAccessToken,
-} from './lib/driveStorage';
 import { Header } from './components/Header';
 import { CalendarView } from './components/CalendarView';
 import { EventModal } from './components/EventModal';
@@ -74,38 +71,6 @@ export default function App() {
     userProfiles.user2.name
   );
 
-  // Helper to trigger background Drive sync if connected
-  const syncToDriveIfConnected = async (
-    updatedEvents: CalendarEvent[],
-    updatedProfiles?: Record<'user1' | 'user2', UserProfile>
-  ) => {
-    const token = getDriveAccessToken();
-    if (!token) return;
-
-    try {
-      let store = (await readCalendarStoreFromDrive(token)) || {
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        contexts: {},
-      };
-
-      const profiles = updatedProfiles || userProfiles;
-      store.contexts[currentContextKey] = {
-        events: updatedEvents,
-        avatars: {
-          user1: profiles.user1.avatarUrl,
-          user2: profiles.user2.avatarUrl,
-        },
-        updatedAt: new Date().toISOString(),
-      };
-      store.updatedAt = new Date().toISOString();
-
-      await saveCalendarStoreToDrive(token, store);
-    } catch (err) {
-      console.error('Background Drive sync error:', err);
-    }
-  };
-
   // Avatar update handler
   const handleUpdateAvatar = (userId: 'user1' | 'user2', avatarUrl: string | undefined) => {
     const updatedProfiles = {
@@ -117,10 +82,13 @@ export default function App() {
     };
     setUserProfiles(updatedProfiles);
     saveStoredAvatar(currentContextKey, userId, avatarUrl);
-    syncToDriveIfConnected(events, updatedProfiles);
+    saveServerCalendarData(currentContextKey, events, {
+      user1: updatedProfiles.user1.avatarUrl,
+      user2: updatedProfiles.user2.avatarUrl,
+    });
   };
 
-  // Load events and avatars on context change
+  // Load events and avatars on context change & poll server for cross-device sync
   useEffect(() => {
     const cachedEvents = getStoredEvents(currentContextKey);
     setEvents(cachedEvents);
@@ -137,32 +105,44 @@ export default function App() {
       },
     }));
 
-    // Check if Google Drive has updated file
-    const token = getDriveAccessToken();
-    if (token) {
-      readCalendarStoreFromDrive(token).then((store) => {
-        if (store?.contexts?.[currentContextKey]) {
-          const driveData = store.contexts[currentContextKey];
-          if (driveData.events) {
-            const active = pruneExpiredEvents(driveData.events);
-            setEvents(active);
-            saveEvents(active, currentContextKey);
-          }
-        }
-      });
-    }
-
-    // Periodic prune for expired events
-    const interval = setInterval(() => {
-      setEvents((prevEvents) => {
-        const active = pruneExpiredEvents(prevEvents);
-        if (active.length !== prevEvents.length) {
+    // Function to sync with server
+    const syncWithServer = async () => {
+      const serverData = await fetchServerCalendarData(currentContextKey);
+      if (serverData) {
+        if (serverData.events && serverData.events.length > 0) {
+          const active = pruneExpiredEvents(serverData.events);
+          setEvents(active);
           saveEvents(active, currentContextKey);
-          syncToDriveIfConnected(active);
+        } else if (cachedEvents.length > 0) {
+          // Push initial local events to server if server is empty
+          saveServerCalendarData(currentContextKey, cachedEvents, {
+            user1: cachedAvatars.user1 || urlConfig.img1,
+            user2: cachedAvatars.user2 || urlConfig.img2,
+          });
         }
-        return active;
-      });
-    }, 15000);
+
+        if (serverData.avatars) {
+          setUserProfiles((prev) => ({
+            user1: {
+              ...prev.user1,
+              avatarUrl: serverData.avatars.user1 !== undefined ? serverData.avatars.user1 : prev.user1.avatarUrl,
+            },
+            user2: {
+              ...prev.user2,
+              avatarUrl: serverData.avatars.user2 !== undefined ? serverData.avatars.user2 : prev.user2.avatarUrl,
+            },
+          }));
+        }
+      }
+    };
+
+    // Initial server fetch
+    syncWithServer();
+
+    // Periodic cross-device polling interval (every 5 seconds)
+    const interval = setInterval(() => {
+      syncWithServer();
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [currentContextKey, urlConfig]);
@@ -228,7 +208,10 @@ export default function App() {
     const activeEvents = pruneExpiredEvents(updatedEvents);
     setEvents(activeEvents);
     saveEvents(activeEvents, currentContextKey);
-    syncToDriveIfConnected(activeEvents);
+    saveServerCalendarData(currentContextKey, activeEvents, {
+      user1: userProfiles.user1.avatarUrl,
+      user2: userProfiles.user2.avatarUrl,
+    });
 
     setEditingEvent(null);
     setIsEventModalOpen(false);
@@ -240,7 +223,10 @@ export default function App() {
     const activeEvents = pruneExpiredEvents(updatedEvents);
     setEvents(activeEvents);
     saveEvents(activeEvents, currentContextKey);
-    syncToDriveIfConnected(activeEvents);
+    saveServerCalendarData(currentContextKey, activeEvents, {
+      user1: userProfiles.user1.avatarUrl,
+      user2: userProfiles.user2.avatarUrl,
+    });
     setInspectEvent(null);
   };
 

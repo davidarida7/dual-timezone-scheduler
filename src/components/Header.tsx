@@ -1,7 +1,15 @@
 import React from 'react';
 import { UserProfile } from '../types';
 import { UserAvatar } from './UserAvatar';
-import { Share2, Plus, User, Globe, ChevronDown, CalendarDays, Camera } from 'lucide-react';
+import {
+  Share2,
+  Plus,
+  User,
+  Globe,
+  ChevronDown,
+  CalendarDays,
+  Camera,
+} from 'lucide-react';
 
 interface HeaderProps {
   activeUser: 'user1' | 'user2';
@@ -45,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div>
               <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-                24h Dual Timezone
+                Dual-Timezone 24h Scheduler
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 border border-slate-700 font-mono">
                   Calendar
                 </span>

@@ -125,6 +125,77 @@ export function getStoredEvents(contextKey: string = DEFAULT_CONTEXT_KEY): Calen
   return activeEvents;
 }
 
+export function exportAllData(): string {
+  if (typeof window === 'undefined') return '{}';
+  const eventsDict = getStoredEventsDictionary();
+  const rawAvatars = localStorage.getItem(STORAGE_KEYS.AVATARS);
+  const avatars = rawAvatars ? JSON.parse(rawAvatars) : {};
+
+  return JSON.stringify(
+    {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      events: eventsDict,
+      avatars: avatars,
+    },
+    null,
+    2
+  );
+}
+
+export function importData(jsonString: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const data = JSON.parse(jsonString);
+    if (data.events && typeof data.events === 'object') {
+      localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(data.events));
+    }
+    if (data.avatars && typeof data.avatars === 'object') {
+      localStorage.setItem(STORAGE_KEYS.AVATARS, JSON.stringify(data.avatars));
+    }
+    return true;
+  } catch (e) {
+    console.error('Failed to import JSON data:', e);
+    return false;
+  }
+}
+
+export async function fetchServerCalendarData(contextKey: string = DEFAULT_CONTEXT_KEY): Promise<{ events: CalendarEvent[]; avatars: Record<'user1' | 'user2', string | undefined> } | null> {
+  try {
+    const res = await fetch(`/api/calendar?contextKey=${encodeURIComponent(contextKey)}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) {
+        return {
+          events: json.data.events || [],
+          avatars: json.data.avatars || {},
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Server storage fetch failed, using local fallback:', err);
+  }
+  return null;
+}
+
+export async function saveServerCalendarData(
+  contextKey: string = DEFAULT_CONTEXT_KEY,
+  events: CalendarEvent[],
+  avatars?: Record<'user1' | 'user2', string | undefined>
+): Promise<boolean> {
+  try {
+    const res = await fetch('/api/calendar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contextKey, events, avatars }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Server storage save failed, relying on local storage:', err);
+    return false;
+  }
+}
+
 export function saveEvents(events: CalendarEvent[], contextKey: string = DEFAULT_CONTEXT_KEY): void {
   if (typeof window === 'undefined') return;
   const dict = getStoredEventsDictionary();

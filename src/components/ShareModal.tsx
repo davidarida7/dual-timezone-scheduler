@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { X, Share2, Copy, Check, Globe, User, Link as LinkIcon } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { X, Share2, Copy, Check, Globe, User, Link as LinkIcon, Download, Upload, Database } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { exportAllData, importData } from '../lib/storage';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -24,6 +25,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   img2,
 }) => {
   const [copied, setCopied] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -45,6 +48,41 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const handleExportJson = () => {
+    const dataStr = exportAllData();
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `calendar-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        const success = importData(content);
+        if (success) {
+          setImportStatus('Backup restored successfully! Reloading...');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        } else {
+          setImportStatus('Failed to restore backup: Invalid JSON file format.');
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <AnimatePresence>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
@@ -61,9 +99,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 <Share2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Share Calendar Configuration</h3>
+                <h3 className="text-lg font-bold text-white">Share & Data Backup</h3>
                 <p className="text-xs text-slate-400">
-                  Generates a custom URL pre-configured with timezones & user identities
+                  Share pre-configured URL presets or backup/restore calendar JSON files
                 </p>
               </div>
             </div>
@@ -119,7 +157,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <div className="space-y-1.5">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                 <LinkIcon className="w-3.5 h-3.5 text-sky-400" />
-                <span>Shareable Link</span>
+                <span>Shareable Preset Link</span>
               </label>
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 font-mono text-xs text-sky-300 break-all select-all">
                 {shareableUrl}
@@ -147,6 +185,45 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 </>
               )}
             </button>
+
+            {/* JSON File Backup & Restore Section */}
+            <div className="pt-3 border-t border-slate-800 space-y-2.5">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Database className="w-3.5 h-3.5 text-sky-400" />
+                <span>Local Data Backup & Migration (Zero Keys Required)</span>
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleExportJson}
+                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-sky-300 font-medium rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export JSON</span>
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-medium rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Import JSON</span>
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept=".json"
+                  className="hidden"
+                />
+              </div>
+
+              {importStatus && (
+                <p className={`text-xs p-2 rounded-lg ${importStatus.includes('successfully') ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/30' : 'bg-rose-950/60 text-rose-300 border border-rose-500/30'}`}>
+                  {importStatus}
+                </p>
+              )}
+            </div>
           </div>
         </motion.div>
       </div>
