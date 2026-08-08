@@ -162,7 +162,12 @@ export function importData(jsonString: string): boolean {
 
 export async function fetchServerCalendarData(contextKey: string = DEFAULT_CONTEXT_KEY): Promise<{ events: CalendarEvent[]; avatars: Record<'user1' | 'user2', string | undefined> } | null> {
   try {
-    const res = await fetch(`/api/calendar?contextKey=${encodeURIComponent(contextKey)}`);
+    const res = await fetch(`/api/calendar?contextKey=${encodeURIComponent(contextKey)}&_t=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    });
     if (res.ok) {
       const json = await res.json();
       if (json.data) {

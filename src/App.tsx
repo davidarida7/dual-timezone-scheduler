@@ -62,6 +62,7 @@ export default function App() {
 
   const [isTzModalOpen, setIsTzModalOpen] = useState(false);
   const [tzTargetSide, setTzTargetSide] = useState<'left' | 'right'>('left');
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline'>('synced');
 
   // Derive current parameters context key (tied to timezones and user names)
   const currentContextKey = getContextKey(
@@ -107,18 +108,24 @@ export default function App() {
 
     // Function to sync with server
     const syncWithServer = async () => {
+      setSyncStatus('syncing');
       const serverData = await fetchServerCalendarData(currentContextKey);
       if (serverData) {
-        if (serverData.events && serverData.events.length > 0) {
+        if (serverData.events) {
           const active = pruneExpiredEvents(serverData.events);
-          setEvents(active);
-          saveEvents(active, currentContextKey);
-        } else if (cachedEvents.length > 0) {
-          // Push initial local events to server if server is empty
-          saveServerCalendarData(currentContextKey, cachedEvents, {
-            user1: cachedAvatars.user1 || urlConfig.img1,
-            user2: cachedAvatars.user2 || urlConfig.img2,
-          });
+          // Only update if server state differs to prevent unnecessary re-renders
+          const currentEventsLocal = getStoredEvents(currentContextKey);
+          if (JSON.stringify(active) !== JSON.stringify(currentEventsLocal)) {
+            setEvents(active);
+            saveEvents(active, currentContextKey);
+          }
+          if (active.length === 0 && currentEventsLocal.length > 0 && !serverData.avatars) {
+            // Push local events if server hasn't saved anything yet for this context
+            saveServerCalendarData(currentContextKey, currentEventsLocal, {
+              user1: cachedAvatars.user1 || urlConfig.img1,
+              user2: cachedAvatars.user2 || urlConfig.img2,
+            });
+          }
         }
 
         if (serverData.avatars) {
@@ -133,6 +140,9 @@ export default function App() {
             },
           }));
         }
+        setSyncStatus('synced');
+      } else {
+        setSyncStatus('offline');
       }
     };
 
@@ -250,6 +260,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-sky-500 selection:text-slate-950">
       {/* Top Header Navigation */}
       <Header
+        syncStatus={syncStatus}
         activeUser={activeUser}
         userProfiles={userProfiles}
         onSelectActiveUser={setActiveUser}

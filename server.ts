@@ -53,6 +53,17 @@ function writeStore(data: ServerStore): boolean {
   }
 }
 
+// In-memory store initialized from disk
+let memoryStore: ServerStore = readStore();
+
+// Middleware to prevent caching on API endpoints
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // API Routes
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
@@ -61,8 +72,7 @@ app.get('/api/health', (req, res) => {
 // GET calendar context data
 app.get('/api/calendar', (req, res) => {
   const contextKey = (req.query.contextKey as string) || 'default';
-  const store = readStore();
-  const contextData = store.contexts[contextKey] || {
+  const contextData = memoryStore.contexts[contextKey] || {
     events: [],
     avatars: {},
     updatedAt: new Date(0).toISOString(),
@@ -81,21 +91,21 @@ app.post('/api/calendar', (req, res) => {
     return res.status(400).json({ error: 'Invalid contextKey or events' });
   }
 
-  const store = readStore();
-  const existing = store.contexts[contextKey] || { events: [], avatars: {}, updatedAt: '' };
+  const existing = memoryStore.contexts[contextKey] || { events: [], avatars: {}, updatedAt: '' };
 
-  store.contexts[contextKey] = {
+  memoryStore.contexts[contextKey] = {
     events,
-    avatars: avatars || existing.avatars || {},
+    avatars: avatars !== undefined ? avatars : (existing.avatars || {}),
     updatedAt: new Date().toISOString(),
   };
 
-  const success = writeStore(store);
+  const success = writeStore(memoryStore);
   if (success) {
     res.json({
       success: true,
       contextKey,
-      updatedAt: store.contexts[contextKey].updatedAt,
+      updatedAt: memoryStore.contexts[contextKey].updatedAt,
+      data: memoryStore.contexts[contextKey],
     });
   } else {
     res.status(500).json({ error: 'Failed to write to server storage' });

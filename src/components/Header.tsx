@@ -9,6 +9,8 @@ import {
   ChevronDown,
   CalendarDays,
   Camera,
+  CloudCheck,
+  RefreshCw,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -22,6 +24,7 @@ interface HeaderProps {
   onOpenNewEventModal: () => void;
   onOpenShareModal: () => void;
   onOpenAvatarModal: () => void;
+  syncStatus?: 'synced' | 'syncing' | 'offline';
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNewEventModal,
   onOpenShareModal,
   onOpenAvatarModal,
+  syncStatus = 'synced',
 }) => {
   const formatTzLabel = (tz: string) => {
     const parts = tz.split('/');
@@ -56,6 +60,21 @@ export const Header: React.FC<HeaderProps> = ({
                 Dual-Timezone 24h Scheduler
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 border border-slate-700 font-mono">
                   Calendar
+                </span>
+                <span
+                  className={`text-[11px] px-2 py-0.5 rounded-full border flex items-center gap-1 font-medium ${
+                    syncStatus === 'syncing'
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                      : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                  }`}
+                  title="Zero-Key Server Persistence & Cross-Device Live Sync"
+                >
+                  {syncStatus === 'syncing' ? (
+                    <RefreshCw className="w-3 h-3 text-amber-400 animate-spin" />
+                  ) : (
+                    <CloudCheck className="w-3 h-3 text-emerald-400" />
+                  )}
+                  <span>{syncStatus === 'syncing' ? 'Syncing...' : 'Live Synced'}</span>
                 </span>
               </h1>
               <p className="text-xs text-slate-400 hidden sm:block">
