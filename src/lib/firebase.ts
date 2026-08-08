@@ -6,16 +6,47 @@ import {
   setDoc,
   onSnapshot,
   Unsubscribe,
+  Firestore,
 } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { CalendarEvent } from '../types';
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+// Safely resolve firebase-applet-config.json if present without throwing build error if missing on Vercel/GitHub
+const configModules = import.meta.glob<{ default: Record<string, string> }>(
+  '../../firebase-applet-config.json',
+  { eager: true }
+);
 
-export const db =
-  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-    ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-    : getFirestore(app);
+const modulesList = Object.values(configModules) as Array<{ default?: Record<string, string> }>;
+const fileConfig = modulesList[0]?.default || {};
+
+export const firebaseConfig = {
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || fileConfig.projectId || '',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || fileConfig.appId || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || fileConfig.apiKey || '',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || fileConfig.authDomain || '',
+  firestoreDatabaseId:
+    import.meta.env.VITE_FIREBASE_DATABASE_ID || fileConfig.firestoreDatabaseId || '(default)',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || fileConfig.storageBucket || '',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || fileConfig.messagingSenderId || '',
+};
+
+let dbInstance: Firestore | null = null;
+
+if (firebaseConfig.apiKey && firebaseConfig.projectId) {
+  try {
+    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+    dbInstance =
+      firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
+        ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+        : getFirestore(app);
+  } catch (err) {
+    console.error('Failed to initialize Firebase app:', err);
+  }
+} else {
+  console.warn('Firebase config missing. Operating in local storage mode.');
+}
+
+export const db = dbInstance;
 
 // Helper to convert context key string to valid Firestore document ID
 export function getDocIdForContextKey(contextKey: string): string {
@@ -66,6 +97,11 @@ export function subscribeToContext(
   onUpdate: (data: ContextData) => void,
   onError?: (err: Error) => void
 ): Unsubscribe {
+  if (!db) {
+    if (onError) onError(new Error('Firestore database is not initialized'));
+    return () => {};
+  }
+
   const docId = getDocIdForContextKey(contextKey);
   const docRef = doc(db, 'calendars', docId);
 
@@ -103,6 +139,7 @@ export async function saveEventsToFirestore(
   events: CalendarEvent[],
   currentAvatars?: { user1?: string; user2?: string }
 ): Promise<void> {
+  if (!db) return;
   try {
     const docId = getDocIdForContextKey(contextKey);
     const docRef = doc(db, 'calendars', docId);
@@ -137,6 +174,7 @@ export async function saveAvatarToFirestore(
   avatarUrl: string | undefined,
   currentEvents?: CalendarEvent[]
 ): Promise<void> {
+  if (!db) return;
   try {
     const docId = getDocIdForContextKey(contextKey);
     const docRef = doc(db, 'calendars', docId);
