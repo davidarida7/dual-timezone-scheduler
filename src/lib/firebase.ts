@@ -33,6 +33,32 @@ export interface ContextData {
 }
 
 /**
+ * Ensures event objects have no undefined properties before saving to Firestore
+ */
+export function sanitizeEventForFirestore(event: CalendarEvent): Record<string, any> {
+  const clean: Record<string, any> = {
+    id: String(event.id || ''),
+    title: String(event.title || ''),
+    startTimeIso: String(event.startTimeIso || new Date().toISOString()),
+    durationMinutes: Number(event.durationMinutes) || 30,
+    createdBy: event.createdBy === 'user2' ? 'user2' : 'user1',
+    createdAt: String(event.createdAt || new Date().toISOString()),
+  };
+
+  if (event.description) {
+    clean.description = String(event.description);
+  }
+  if (event.location) {
+    clean.location = String(event.location);
+  }
+  if (event.category) {
+    clean.category = String(event.category);
+  }
+
+  return clean;
+}
+
+/**
  * Subscribe to real-time updates for a calendar context key across all devices
  */
 export function subscribeToContext(
@@ -50,7 +76,7 @@ export function subscribeToContext(
         const data = snapshot.data() as ContextData;
         onUpdate({
           contextKey: data.contextKey || contextKey,
-          events: data.events || [],
+          events: Array.isArray(data.events) ? data.events : [],
           avatars: data.avatars || {},
           updatedAt: data.updatedAt,
         });
@@ -81,14 +107,19 @@ export async function saveEventsToFirestore(
     const docId = getDocIdForContextKey(contextKey);
     const docRef = doc(db, 'calendars', docId);
 
-    const payload: Partial<ContextData> = {
+    const cleanEvents = events.map(sanitizeEventForFirestore);
+
+    const payload: Record<string, any> = {
       contextKey,
-      events,
+      events: cleanEvents,
       updatedAt: new Date().toISOString(),
     };
 
     if (currentAvatars) {
-      payload.avatars = currentAvatars;
+      payload.avatars = {
+        user1: currentAvatars.user1 || '',
+        user2: currentAvatars.user2 || '',
+      };
     }
 
     await setDoc(docRef, payload, { merge: true });
@@ -114,18 +145,18 @@ export async function saveAvatarToFirestore(
     const existingAvatars = snapshot.exists() ? (snapshot.data().avatars || {}) : {};
 
     const updatedAvatars = {
-      ...existingAvatars,
-      [userId]: avatarUrl || '',
+      user1: userId === 'user1' ? (avatarUrl || '') : (existingAvatars.user1 || ''),
+      user2: userId === 'user2' ? (avatarUrl || '') : (existingAvatars.user2 || ''),
     };
 
-    const payload: Partial<ContextData> = {
+    const payload: Record<string, any> = {
       contextKey,
       avatars: updatedAvatars,
       updatedAt: new Date().toISOString(),
     };
 
-    if (currentEvents) {
-      payload.events = currentEvents;
+    if (currentEvents && Array.isArray(currentEvents)) {
+      payload.events = currentEvents.map(sanitizeEventForFirestore);
     }
 
     await setDoc(docRef, payload, { merge: true });

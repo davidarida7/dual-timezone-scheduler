@@ -113,8 +113,10 @@ export default function App() {
         let rawEvents = data.events;
 
         // If Firestore document is brand new & empty for DEFAULT_CONTEXT_KEY, load initial demo events
-        if (rawEvents.length === 0 && currentContextKey === DEFAULT_CONTEXT_KEY) {
+        if (!data.updatedAt && rawEvents.length === 0 && currentContextKey === DEFAULT_CONTEXT_KEY) {
           rawEvents = getStoredEvents(DEFAULT_CONTEXT_KEY);
+          // Persist initial demo events to Firestore so all connected devices sync
+          saveEventsToFirestore(DEFAULT_CONTEXT_KEY, rawEvents);
         }
 
         const activeEvents = pruneExpiredEvents(rawEvents);
