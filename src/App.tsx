@@ -18,6 +18,7 @@ import { EventDetailModal } from './components/EventDetailModal';
 import { ShareModal } from './components/ShareModal';
 import { TimezoneSelectorModal } from './components/TimezoneSelectorModal';
 import { AvatarUploadModal } from './components/AvatarUploadModal';
+import { CloudSqlDebugModal } from './components/CloudSqlDebugModal';
 
 export default function App() {
   const [urlConfig] = useState(() => parseUrlParams());
@@ -59,6 +60,7 @@ export default function App() {
   const [inspectEvent, setInspectEvent] = useState<CalendarEvent | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+  const [isDbModalOpen, setIsDbModalOpen] = useState(false);
 
   const [isTzModalOpen, setIsTzModalOpen] = useState(false);
   const [tzTargetSide, setTzTargetSide] = useState<'left' | 'right'>('left');
@@ -281,6 +283,7 @@ export default function App() {
         }}
         onOpenShareModal={() => setIsShareModalOpen(true)}
         onOpenAvatarModal={() => setIsAvatarModalOpen(true)}
+        onOpenDbModal={() => setIsDbModalOpen(true)}
       />
 
       {/* Main 24-Hour Calendar Body */}
@@ -352,6 +355,12 @@ export default function App() {
         onClose={() => setIsAvatarModalOpen(false)}
         userProfiles={userProfiles}
         onUpdateAvatar={handleUpdateAvatar}
+      />
+
+      <CloudSqlDebugModal
+        isOpen={isDbModalOpen}
+        onClose={() => setIsDbModalOpen(false)}
+        currentContextKey={currentContextKey}
       />
     </div>
   );

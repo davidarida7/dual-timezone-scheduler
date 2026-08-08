@@ -11,6 +11,7 @@ import {
   Camera,
   CloudCheck,
   RefreshCw,
+  Database,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -24,6 +25,7 @@ interface HeaderProps {
   onOpenNewEventModal: () => void;
   onOpenShareModal: () => void;
   onOpenAvatarModal: () => void;
+  onOpenDbModal?: () => void;
   syncStatus?: 'synced' | 'syncing' | 'offline';
 }
 
@@ -38,6 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNewEventModal,
   onOpenShareModal,
   onOpenAvatarModal,
+  onOpenDbModal,
   syncStatus = 'synced',
 }) => {
   const formatTzLabel = (tz: string) => {
@@ -58,16 +61,14 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
                 Dual-Timezone 24h Scheduler
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 border border-slate-700 font-mono">
-                  Calendar
-                </span>
-                <span
-                  className={`text-[11px] px-2 py-0.5 rounded-full border flex items-center gap-1 font-medium ${
+                <button
+                  onClick={onOpenDbModal}
+                  className={`text-[11px] px-2 py-0.5 rounded-full border flex items-center gap-1 font-medium cursor-pointer transition-all ${
                     syncStatus === 'syncing'
                       ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                      : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20'
                   }`}
-                  title="Zero-Key Server Persistence & Cross-Device Live Sync"
+                  title="Inspect Server Database Storage & Cloud SQL Debugger"
                 >
                   {syncStatus === 'syncing' ? (
                     <RefreshCw className="w-3 h-3 text-amber-400 animate-spin" />
@@ -75,7 +76,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <CloudCheck className="w-3 h-3 text-emerald-400" />
                   )}
                   <span>{syncStatus === 'syncing' ? 'Syncing...' : 'Live Synced'}</span>
-                </span>
+                </button>
               </h1>
               <p className="text-xs text-slate-400 hidden sm:block">
                 Synchronized 24-hour timeline across two global locations
@@ -127,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Right: Timezone quick buttons & Share/New Event */}
+        {/* Right: Timezone quick buttons & DB Debug Inspector Button */}
         <div className="flex flex-wrap items-center justify-between md:justify-end gap-2">
           {/* Timezone Badges */}
           <div className="flex items-center gap-2">
@@ -154,6 +155,15 @@ export const Header: React.FC<HeaderProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              onClick={onOpenDbModal}
+              className="p-2 text-sky-300 hover:text-white bg-sky-950/60 hover:bg-sky-900/70 rounded-xl border border-sky-500/30 text-xs flex items-center gap-1.5 transition-colors cursor-pointer font-medium"
+              title="Inspect Cloud SQL / Server Database Storage"
+            >
+              <Database className="w-4 h-4 text-sky-400" />
+              <span className="hidden sm:inline">DB Inspector</span>
+            </button>
+
+            <button
               onClick={onOpenShareModal}
               className="p-2 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
               title="Share Preset Link"
@@ -176,3 +186,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+
