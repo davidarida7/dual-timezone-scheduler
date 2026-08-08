@@ -8,13 +8,12 @@ import {
   saveStoredAvatar,
   getContextKey,
   pruneExpiredEvents,
-  DEFAULT_CONTEXT_KEY,
 } from './lib/storage';
 import {
-  subscribeToContext,
-  saveEventsToFirestore,
-  saveAvatarToFirestore,
-} from './lib/firebase';
+  saveCalendarStoreToDrive,
+  readCalendarStoreFromDrive,
+  getDriveAccessToken,
+} from './lib/driveStorage';
 import { Header } from './components/Header';
 import { CalendarView } from './components/CalendarView';
 import { EventModal } from './components/EventModal';
@@ -25,7 +24,7 @@ import { AvatarUploadModal } from './components/AvatarUploadModal';
 
 export default function App() {
   const [urlConfig] = useState(() => parseUrlParams());
-  
+
   // Timezone states
   const [leftTz, setLeftTz] = useState<string>(urlConfig.tz1);
   const [rightTz, setRightTz] = useState<string>(urlConfig.tz2);
@@ -75,22 +74,54 @@ export default function App() {
     userProfiles.user2.name
   );
 
-  // Avatar update and persistence handler (keyed by currentContextKey)
-  const handleUpdateAvatar = (userId: 'user1' | 'user2', avatarUrl: string | undefined) => {
-    setUserProfiles((prev) => ({
-      ...prev,
-      [userId]: {
-        ...prev[userId],
-        avatarUrl,
-      },
-    }));
-    saveStoredAvatar(currentContextKey, userId, avatarUrl);
-    saveAvatarToFirestore(currentContextKey, userId, avatarUrl, events);
+  // Helper to trigger background Drive sync if connected
+  const syncToDriveIfConnected = async (
+    updatedEvents: CalendarEvent[],
+    updatedProfiles?: Record<'user1' | 'user2', UserProfile>
+  ) => {
+    const token = getDriveAccessToken();
+    if (!token) return;
+
+    try {
+      let store = (await readCalendarStoreFromDrive(token)) || {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        contexts: {},
+      };
+
+      const profiles = updatedProfiles || userProfiles;
+      store.contexts[currentContextKey] = {
+        events: updatedEvents,
+        avatars: {
+          user1: profiles.user1.avatarUrl,
+          user2: profiles.user2.avatarUrl,
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      store.updatedAt = new Date().toISOString();
+
+      await saveCalendarStoreToDrive(token, store);
+    } catch (err) {
+      console.error('Background Drive sync error:', err);
+    }
   };
 
-  // Real-time Firestore synchronization for events and avatars tied to currentContextKey
+  // Avatar update handler
+  const handleUpdateAvatar = (userId: 'user1' | 'user2', avatarUrl: string | undefined) => {
+    const updatedProfiles = {
+      ...userProfiles,
+      [userId]: {
+        ...userProfiles[userId],
+        avatarUrl,
+      },
+    };
+    setUserProfiles(updatedProfiles);
+    saveStoredAvatar(currentContextKey, userId, avatarUrl);
+    syncToDriveIfConnected(events, updatedProfiles);
+  };
+
+  // Load events and avatars on context change
   useEffect(() => {
-    // 1. Initial local load
     const cachedEvents = getStoredEvents(currentContextKey);
     setEvents(cachedEvents);
 
@@ -106,49 +137,20 @@ export default function App() {
       },
     }));
 
-    // 2. Real-time Firestore subscription across devices/browsers
-    const unsubscribe = subscribeToContext(
-      currentContextKey,
-      (data) => {
-        let rawEvents = data.events;
-
-        // If Firestore document is brand new & empty for DEFAULT_CONTEXT_KEY, load initial demo events
-        if (!data.updatedAt && rawEvents.length === 0 && currentContextKey === DEFAULT_CONTEXT_KEY) {
-          rawEvents = getStoredEvents(DEFAULT_CONTEXT_KEY);
-          // Persist initial demo events to Firestore so all connected devices sync
-          saveEventsToFirestore(DEFAULT_CONTEXT_KEY, rawEvents);
-        }
-
-        const activeEvents = pruneExpiredEvents(rawEvents);
-        setEvents(activeEvents);
-        saveEvents(activeEvents, currentContextKey);
-
-        // Sync avatars for this specific context key
-        const localAvatars = getStoredAvatars(currentContextKey);
-        const u1Avatar =
-          data.avatars.user1 !== undefined
-            ? (data.avatars.user1 || undefined)
-            : (localAvatars.user1 !== undefined ? localAvatars.user1 : urlConfig.img1);
-
-        const u2Avatar =
-          data.avatars.user2 !== undefined
-            ? (data.avatars.user2 || undefined)
-            : (localAvatars.user2 !== undefined ? localAvatars.user2 : urlConfig.img2);
-
-        setUserProfiles((prev) => {
-          if (prev.user1.avatarUrl === u1Avatar && prev.user2.avatarUrl === u2Avatar) {
-            return prev;
+    // Check if Google Drive has updated file
+    const token = getDriveAccessToken();
+    if (token) {
+      readCalendarStoreFromDrive(token).then((store) => {
+        if (store?.contexts?.[currentContextKey]) {
+          const driveData = store.contexts[currentContextKey];
+          if (driveData.events) {
+            const active = pruneExpiredEvents(driveData.events);
+            setEvents(active);
+            saveEvents(active, currentContextKey);
           }
-          return {
-            user1: { ...prev.user1, avatarUrl: u1Avatar },
-            user2: { ...prev.user2, avatarUrl: u2Avatar },
-          };
-        });
-      },
-      (err) => {
-        console.warn('Firestore fallback to local storage:', err);
-      }
-    );
+        }
+      });
+    }
 
     // Periodic prune for expired events
     const interval = setInterval(() => {
@@ -156,19 +158,16 @@ export default function App() {
         const active = pruneExpiredEvents(prevEvents);
         if (active.length !== prevEvents.length) {
           saveEvents(active, currentContextKey);
-          saveEventsToFirestore(currentContextKey, active);
+          syncToDriveIfConnected(active);
         }
         return active;
       });
     }, 15000);
 
-    return () => {
-      unsubscribe();
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [currentContextKey, urlConfig]);
 
-  // Synchronize browser address bar URL parameters when settings change
+  // Synchronize browser address bar URL parameters
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -178,7 +177,6 @@ export default function App() {
       params.set('user1', userProfiles.user1.name);
       params.set('user2', userProfiles.user2.name);
 
-      // Only sync HTTP/HTTPS URLs to browser URL query bar to avoid huge base64 strings in URL
       if (userProfiles.user1.avatarUrl && !userProfiles.user1.avatarUrl.startsWith('data:')) {
         params.set('img1', userProfiles.user1.avatarUrl);
       } else {
@@ -230,10 +228,7 @@ export default function App() {
     const activeEvents = pruneExpiredEvents(updatedEvents);
     setEvents(activeEvents);
     saveEvents(activeEvents, currentContextKey);
-    saveEventsToFirestore(currentContextKey, activeEvents, {
-      user1: userProfiles.user1.avatarUrl,
-      user2: userProfiles.user2.avatarUrl,
-    });
+    syncToDriveIfConnected(activeEvents);
 
     setEditingEvent(null);
     setIsEventModalOpen(false);
@@ -245,10 +240,7 @@ export default function App() {
     const activeEvents = pruneExpiredEvents(updatedEvents);
     setEvents(activeEvents);
     saveEvents(activeEvents, currentContextKey);
-    saveEventsToFirestore(currentContextKey, activeEvents, {
-      user1: userProfiles.user1.avatarUrl,
-      user2: userProfiles.user2.avatarUrl,
-    });
+    syncToDriveIfConnected(activeEvents);
     setInspectEvent(null);
   };
 
