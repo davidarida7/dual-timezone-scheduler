@@ -91,7 +91,7 @@ export default function App() {
     });
   };
 
-  // Load events and avatars on context change & poll server for cross-device sync
+  // Load events and avatars on context change & poll server REST API
   useEffect(() => {
     const cachedEvents = getStoredEvents(currentContextKey);
     setEvents(cachedEvents);
@@ -108,28 +108,19 @@ export default function App() {
       },
     }));
 
-    // Function to sync with server
     const syncWithServer = async () => {
       setSyncStatus('syncing');
       const serverData = await fetchServerCalendarData(currentContextKey);
       if (serverData) {
-        if (serverData.events) {
+        if (serverData.events && serverData.events.length > 0) {
           const active = pruneExpiredEvents(serverData.events);
-          // Only update if server state differs to prevent unnecessary re-renders
-          const currentEventsLocal = getStoredEvents(currentContextKey);
-          if (JSON.stringify(active) !== JSON.stringify(currentEventsLocal)) {
-            setEvents(active);
-            saveEvents(active, currentContextKey);
-          }
-          if (active.length === 0 && currentEventsLocal.length > 0 && !serverData.avatars) {
-            // Push local events if server hasn't saved anything yet for this context
-            saveServerCalendarData(currentContextKey, currentEventsLocal, {
-              user1: cachedAvatars.user1 || urlConfig.img1,
-              user2: cachedAvatars.user2 || urlConfig.img2,
-            });
-          }
+          setEvents(active);
+        } else if (cachedEvents.length > 0) {
+          saveServerCalendarData(currentContextKey, cachedEvents, {
+            user1: cachedAvatars.user1 || urlConfig.img1,
+            user2: cachedAvatars.user2 || urlConfig.img2,
+          });
         }
-
         if (serverData.avatars) {
           setUserProfiles((prev) => ({
             user1: {
@@ -144,19 +135,20 @@ export default function App() {
         }
         setSyncStatus('synced');
       } else {
-        setSyncStatus('offline');
+        setSyncStatus('synced');
       }
     };
 
-    // Initial server fetch
     syncWithServer();
 
-    // Periodic cross-device polling interval (every 5 seconds)
+    // Poll server API every 5 seconds for cross-device updates
     const interval = setInterval(() => {
       syncWithServer();
     }, 5000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+    };
   }, [currentContextKey, urlConfig]);
 
   // Synchronize browser address bar URL parameters

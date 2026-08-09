@@ -5,6 +5,16 @@ const STORAGE_KEYS = {
   AVATARS: 'dual_tz_user_avatars_v1',
 };
 
+export const DEFAULT_CONTEXT_KEY = 'America/New_York___Asia/Tokyo___Alex___Jordan';
+
+export function getContextKey(tz1?: string, tz2?: string, user1?: string, user2?: string): string {
+  const normTz1 = (tz1 || 'America/New_York').trim();
+  const normTz2 = (tz2 || 'Asia/Tokyo').trim();
+  const normU1 = (user1 || 'Alex').trim();
+  const normU2 = (user2 || 'Jordan').trim();
+  return `${normTz1}___${normTz2}___${normU1}___${normU2}`;
+}
+
 export function getStoredAvatars(contextKey: string = DEFAULT_CONTEXT_KEY): Record<'user1' | 'user2', string | undefined> {
   if (typeof window === 'undefined') return { user1: undefined, user2: undefined };
   try {
@@ -44,14 +54,16 @@ export function saveStoredAvatar(
   }
 }
 
-export const DEFAULT_CONTEXT_KEY = 'America/New_York___Asia/Tokyo___Alex___Jordan';
-
-export function getContextKey(tz1?: string, tz2?: string, user1?: string, user2?: string): string {
-  const normTz1 = (tz1 || 'America/New_York').trim();
-  const normTz2 = (tz2 || 'Asia/Tokyo').trim();
-  const normU1 = (user1 || 'Alex').trim();
-  const normU2 = (user2 || 'Jordan').trim();
-  return `${normTz1}___${normTz2}___${normU1}___${normU2}`;
+function saveAvatarsLocally(avatars: Record<'user1' | 'user2', string | undefined>, contextKey: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.AVATARS);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[contextKey] = avatars;
+    localStorage.setItem(STORAGE_KEYS.AVATARS, JSON.stringify(parsed));
+  } catch (e) {
+    console.error('Failed to save avatars locally:', e);
+  }
 }
 
 function getStoredEventsDictionary(): Record<string, CalendarEvent[]> {
@@ -94,7 +106,6 @@ export function pruneExpiredEvents(events: CalendarEvent[]): CalendarEvent[] {
   return events.filter((ev) => {
     const startMs = new Date(ev.startTimeIso).getTime();
     const endMs = startMs + (ev.durationMinutes || 60) * 60 * 1000;
-    // Keep events whose end time is still in the future or currently ongoing
     return endMs > nowMs;
   });
 }
@@ -123,6 +134,94 @@ export function getStoredEvents(contextKey: string = DEFAULT_CONTEXT_KEY): Calen
   }
 
   return activeEvents;
+}
+
+/**
+ * Server REST API fetch (supports Cloud SQL, Vercel Postgres, Neon, Supabase, or local persistent JSON store)
+ */
+export async function fetchServerCalendarData(contextKey: string = DEFAULT_CONTEXT_KEY): Promise<{ events: CalendarEvent[]; avatars: Record<'user1' | 'user2', string | undefined> } | null> {
+  try {
+    const res = await fetch(`/api/calendar?contextKey=${encodeURIComponent(contextKey)}&_t=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data) {
+        if (Array.isArray(json.data.events)) {
+          saveEvents(json.data.events, contextKey);
+        }
+        if (json.data.avatars) {
+          saveAvatarsLocally(json.data.avatars, contextKey);
+        }
+        return {
+          events: json.data.events || [],
+          avatars: json.data.avatars || { user1: undefined, user2: undefined },
+        };
+      }
+    }
+  } catch (e) {
+    console.info('Server API fetch notice:', e);
+  }
+
+  return null;
+}
+
+/**
+ * Save data via Server REST API & local storage fallback
+ */
+export async function saveServerCalendarData(
+  contextKey: string = DEFAULT_CONTEXT_KEY,
+  events: CalendarEvent[],
+  avatars?: Record<'user1' | 'user2', string | undefined>
+): Promise<boolean> {
+  // Save locally first
+  saveEvents(events, contextKey);
+
+  const finalAvatars = avatars || getStoredAvatars(contextKey);
+
+  try {
+    const res = await fetch('/api/calendar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contextKey, events, avatars: finalAvatars }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn('Server API save notice:', e);
+    return false;
+  }
+}
+
+export function saveEvents(events: CalendarEvent[], contextKey: string = DEFAULT_CONTEXT_KEY): void {
+  if (typeof window === 'undefined') return;
+  const dict = getStoredEventsDictionary();
+  dict[contextKey] = events;
+  saveEventsDictionary(dict);
+}
+
+export function addEvent(event: Omit<CalendarEvent, 'id' | 'createdAt'>, contextKey: string = DEFAULT_CONTEXT_KEY): CalendarEvent {
+  const newEvent: CalendarEvent = {
+    ...event,
+    id: 'evt_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now(),
+    createdAt: new Date().toISOString(),
+  };
+  const current = getStoredEvents(contextKey);
+  const updated = [...current, newEvent];
+  saveEvents(updated, contextKey);
+  saveServerCalendarData(contextKey, updated);
+  return newEvent;
+}
+
+export function updateEvent(updatedEvent: CalendarEvent, contextKey: string = DEFAULT_CONTEXT_KEY): void {
+  const current = getStoredEvents(contextKey);
+  const updated = current.map((ev) => (ev.id === updatedEvent.id ? updatedEvent : ev));
+  saveEvents(updated, contextKey);
+  saveServerCalendarData(contextKey, updated);
+}
+
+export function deleteEvent(eventId: string, contextKey: string = DEFAULT_CONTEXT_KEY): void {
+  const current = getStoredEvents(contextKey);
+  const updated = current.filter((ev) => ev.id !== eventId);
+  saveEvents(updated, contextKey);
+  saveServerCalendarData(contextKey, updated);
 }
 
 export function exportAllData(): string {
@@ -160,78 +259,6 @@ export function importData(jsonString: string): boolean {
   }
 }
 
-export async function fetchServerCalendarData(contextKey: string = DEFAULT_CONTEXT_KEY): Promise<{ events: CalendarEvent[]; avatars: Record<'user1' | 'user2', string | undefined> } | null> {
-  try {
-    const res = await fetch(`/api/calendar?contextKey=${encodeURIComponent(contextKey)}&_t=${Date.now()}`, {
-      cache: 'no-store',
-      headers: {
-        'Cache-Control': 'no-cache',
-      },
-    });
-    if (res.ok) {
-      const json = await res.json();
-      if (json.data) {
-        return {
-          events: json.data.events || [],
-          avatars: json.data.avatars || {},
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('Server storage fetch failed, using local fallback:', err);
-  }
-  return null;
-}
-
-export async function saveServerCalendarData(
-  contextKey: string = DEFAULT_CONTEXT_KEY,
-  events: CalendarEvent[],
-  avatars?: Record<'user1' | 'user2', string | undefined>
-): Promise<boolean> {
-  try {
-    const res = await fetch('/api/calendar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contextKey, events, avatars }),
-    });
-    return res.ok;
-  } catch (err) {
-    console.warn('Server storage save failed, relying on local storage:', err);
-    return false;
-  }
-}
-
-export function saveEvents(events: CalendarEvent[], contextKey: string = DEFAULT_CONTEXT_KEY): void {
-  if (typeof window === 'undefined') return;
-  const dict = getStoredEventsDictionary();
-  dict[contextKey] = events;
-  saveEventsDictionary(dict);
-}
-
-export function addEvent(event: Omit<CalendarEvent, 'id' | 'createdAt'>, contextKey: string = DEFAULT_CONTEXT_KEY): CalendarEvent {
-  const newEvent: CalendarEvent = {
-    ...event,
-    id: 'evt_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now(),
-    createdAt: new Date().toISOString(),
-  };
-  const current = getStoredEvents(contextKey);
-  const updated = [...current, newEvent];
-  saveEvents(updated, contextKey);
-  return newEvent;
-}
-
-export function updateEvent(updatedEvent: CalendarEvent, contextKey: string = DEFAULT_CONTEXT_KEY): void {
-  const current = getStoredEvents(contextKey);
-  const updated = current.map((ev) => (ev.id === updatedEvent.id ? updatedEvent : ev));
-  saveEvents(updated, contextKey);
-}
-
-export function deleteEvent(eventId: string, contextKey: string = DEFAULT_CONTEXT_KEY): void {
-  const current = getStoredEvents(contextKey);
-  const updated = current.filter((ev) => ev.id !== eventId);
-  saveEvents(updated, contextKey);
-}
-
 export function generateInitialDemoEvents(): CalendarEvent[] {
   const now = new Date();
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
@@ -246,7 +273,7 @@ export function generateInitialDemoEvents(): CalendarEvent[] {
       title: 'Global Sync & Handover',
       description: 'Review project milestones, cross-timezone sprint review, and key blockers.',
       location: 'Conference Room A & Remote',
-      startTimeIso: getIsoAtHourOffset(1), // 1 hour from now
+      startTimeIso: getIsoAtHourOffset(1),
       durationMinutes: 60,
       createdBy: 'user1',
       category: 'meeting',

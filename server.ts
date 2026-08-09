@@ -327,6 +327,8 @@ app.post('/api/debug/test-event', async (req, res) => {
   });
 });
 
+export default app;
+
 async function start() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
@@ -348,5 +350,7 @@ async function start() {
   });
 }
 
-start();
+if (!process.env.VERCEL) {
+  start();
+}
 

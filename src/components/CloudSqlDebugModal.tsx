@@ -219,12 +219,45 @@ export const CloudSqlDebugModal: React.FC<CloudSqlDebugModalProps> = ({
         {/* Body Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {error && (
-            <div className="p-4 rounded-xl bg-red-950/40 border border-red-500/30 text-red-300 text-xs flex items-center gap-3">
-              <XCircle className="w-5 h-5 text-red-400 shrink-0" />
-              <div>
-                <p className="font-semibold">Backend Communication Error</p>
-                <p className="text-red-400/80">{error}</p>
+            <div className={`p-4 rounded-xl border text-xs space-y-2 ${
+              error.includes('404')
+                ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                : 'bg-red-950/40 border-red-500/30 text-red-300'
+            }`}>
+              <div className="flex items-center gap-3">
+                {error.includes('404') ? (
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                ) : (
+                  <XCircle className="w-5 h-5 text-red-400 shrink-0" />
+                )}
+                <div>
+                  <p className="font-bold text-sm">
+                    {error.includes('404')
+                      ? 'Static Hosting Host Detected (HTTP 404)'
+                      : 'Backend Server Communication Notice'}
+                  </p>
+                  <p className={error.includes('404') ? 'text-amber-300/90' : 'text-red-400/80'}>{error}</p>
+                </div>
               </div>
+
+              {error.includes('404') && (
+                <div className="pt-2 border-t border-amber-500/20 text-xs space-y-1.5 text-amber-200/90 leading-relaxed">
+                  <p>
+                    <strong>Why this happens:</strong> The deployment host (e.g. <code>dual-timezone-scheduler.vercel.app</code>) is currently serving static frontend files without a running Express backend instance.
+                  </p>
+                  <p>
+                    <strong>Automatic Client Fallback:</strong> All calendar events, timezones, and avatars are automatically operating using local browser storage (<code>localStorage</code>)!
+                  </p>
+                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-amber-500/30 text-[11px] space-y-1">
+                    <p className="font-semibold text-amber-300">💡 How to enable Cloud SQL Serverless on Vercel:</p>
+                    <ul className="list-disc list-inside space-y-0.5 text-slate-300">
+                      <li>We have created <code>vercel.json</code> and <code>api/index.ts</code> in your repo.</li>
+                      <li>In Vercel Settings → Environment Variables, add <code>DATABASE_URL</code> or <code>POSTGRES_URL</code> pointing to your Cloud SQL PostgreSQL instance.</li>
+                      <li>Re-deploy on Vercel, and Vercel Serverless Functions will execute <code>server.ts</code> automatically!</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
